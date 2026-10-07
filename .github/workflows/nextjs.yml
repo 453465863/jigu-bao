@@ -62,9 +62,8 @@ jobs:
             ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-
       - name: Create .env.local
         run: |
-          cat << 'EOF' > .env.local
-          NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          cp .env.production .env.local
+          cat << 'EOF' >> .env.local
           NEXT_PUBLIC_WEB3FORMS_ACCESS_KEY=${{ secrets.NEXT_PUBLIC_WEB3FORMS_ACCESS_KEY }}
           NEXT_PUBLIC_GA_ID=${{ secrets.NEXT_PUBLIC_GA_ID }}
           NEXT_PUBLIC_GITHUB_LATEST_RELEASE_URL=${{ secrets.NEXT_PUBLIC_GITHUB_LATEST_RELEASE_URL }}
