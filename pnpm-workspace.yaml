@@ -1,0 +1,5 @@
+allowBuilds:
+  '@sentry/cli': true
+  msw: true
+  tesseract.js: true
+  unrs-resolver: true
