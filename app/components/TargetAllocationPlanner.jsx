@@ -143,6 +143,22 @@ export default function TargetAllocationPlanner({ rows = [], tradeJournal = null
     return { current, fundTotal, total, targetTotal, spendable, suggestions };
   }, [normalizedRows, effectiveCash, journalAssets?.pendingAmount, budget, targets, preferredByCategory]);
 
+  const initializeTargetsFromCurrentHoldings = () => {
+    if (summary.fundTotal <= 0) return;
+    const nextTargets = Object.fromEntries(CATEGORIES.map((category) => [category, 0]));
+    const categoriesWithHoldings = CATEGORIES.filter((category) => summary.current[category] > 0);
+    let assigned = 0;
+    categoriesWithHoldings.forEach((category, index) => {
+      const isLast = index === categoriesWithHoldings.length - 1;
+      const percent = isLast
+        ? Math.max(0, Number((100 - assigned).toFixed(1)))
+        : Number(((summary.current[category] / summary.fundTotal) * 100).toFixed(1));
+      nextTargets[category] = percent;
+      assigned += percent;
+    });
+    setTargets(nextTargets);
+  };
+
   return (
     <section className="glass card" style={{ marginBottom: 12, padding: 16 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -166,9 +182,19 @@ export default function TargetAllocationPlanner({ rows = [], tradeJournal = null
             <div><span className="muted">计划试算总额</span><strong style={{ display: 'block' }}>¥{money(summary.total)}</strong></div>
           </div>
 
-          {summary.targetTotal !== 100 && (
-            <div style={{ marginTop: 10, color: 'var(--warning, #d97706)' }}>目标比例当前合计 {summary.targetTotal.toFixed(1)}%，请调整到100%。</div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginTop: 10 }}>
+            {summary.targetTotal !== 100 && (
+              <div style={{ color: 'var(--warning, #d97706)' }}>目标比例当前合计 {summary.targetTotal.toFixed(1)}%，请调整到100%。</div>
+            )}
+            <button
+              type="button"
+              className="button secondary"
+              disabled={summary.fundTotal <= 0}
+              onClick={initializeTargetsFromCurrentHoldings}
+            >
+              按当前持仓生成目标
+            </button>
+          </div>
 
           <div className="target-allocation-desktop-table" style={{ overflowX: 'auto', marginTop: 12 }}>
             <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse' }}>
