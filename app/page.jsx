@@ -41,7 +41,8 @@ import { DEFAULT_LOCAL_PORTFOLIO, DEFAULT_LOCAL_PORTFOLIO_SEED_KEY } from './lib
 import { isEmptyAccountLedger, normalizeAccountLedgers } from './lib/accountLedgers';
 import { getAccountsFromSettings, LEGACY_ACCOUNT_ID, normalizeAccounts } from './lib/accounts';
 import { aggregatePortfolioDailyEarnings } from './lib/dailyEarnings';
-import { loadHolidaysForYears, isTradingDay as isDateTradingDay } from './lib/tradingCalendar';
+import { calculateYesterdayEarnings } from './lib/yesterdayEarnings';
+import { getPrevTradingDay, loadHolidaysForYears, isTradingDay as isDateTradingDay } from './lib/tradingCalendar';
 import { asyncPool } from './lib/asyncHelper';
 import {
   fetchSmartFundNetValue,
@@ -153,6 +154,7 @@ export default function HomePage() {
     setAccountLedgers,
     fundDailyEarnings,
     setFundDailyEarnings,
+    fundDividends,
     valuationSeries,
     setValuationSeries,
     initCollapsed,
@@ -831,6 +833,90 @@ export default function HomePage() {
     };
   }, [scopedFunds]);
 
+  const [yesterdayProfitDate, setYesterdayProfitDate] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const previousDate = toTz(todayStr).subtract(1, 'day');
+    loadHolidaysForYears([previousDate.year(), previousDate.subtract(30, 'day').year()]).then(() => {
+      if (cancelled) return;
+      setYesterdayProfitDate(getPrevTradingDay(previousDate)?.format('YYYY-MM-DD') || null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [todayStr]);
+
+  const getYesterdayEarningsForFund = useCallback(
+    (fund) => {
+      if (!yesterdayProfitDate) return { status: 'waiting' };
+      const code = fund?.code;
+      const positions = [];
+      if (currentTab === SUMMARY_TAB_ID) {
+        positions.push({ scopeId: null, holding: holdings?.[code] });
+        for (const group of groups) {
+          positions.push({ scopeId: group.id, holding: groupHoldings?.[group.id]?.[code] });
+        }
+      } else if (activeGroupId) {
+        positions.push({ scopeId: activeGroupId, holding: groupHoldings?.[activeGroupId]?.[code] });
+      } else if (linkedHoldingsForAllFav.linked?.has(code)) {
+        for (const groupId of linkedHoldingsForAllFav.groupIdsByCode[code] || []) {
+          positions.push({ scopeId: groupId, holding: groupHoldings?.[groupId]?.[code] });
+        }
+      } else {
+        positions.push({ scopeId: null, holding: holdings?.[code] });
+      }
+      const results = positions
+        .filter(({ holding }) => isNumber(holding?.share) && holding.share > 0)
+        .map(({ scopeId, holding }) =>
+          calculateYesterdayEarnings({
+            fund,
+            holding,
+            dailyList: fundDailyEarnings?.[scopeId || DAILY_EARNINGS_SCOPE_ALL]?.[code],
+            dividends: fundDividends?.[code]?.list,
+            transactions: transactions?.[code],
+            profitDate: yesterdayProfitDate,
+            scopeIds: [scopeId]
+          })
+        );
+      if (results.length === 0) return { status: 'none', noHoldingCount: 0 };
+      const readyResults = results.filter((result) => result.status === 'ready');
+      const waitingCount = results.filter((result) => result.status === 'waiting').length;
+      const excludedCount = results.filter((result) => result.status === 'excluded').length;
+      const noHoldingCount = results.filter((result) => result.status === 'noHolding').length;
+      const earnings = readyResults.reduce((total, result) => total + result.earnings, 0);
+      return {
+        status:
+          readyResults.length > 0
+            ? 'ready'
+            : waitingCount > 0
+              ? 'waiting'
+              : excludedCount > 0
+                ? 'excluded'
+                : 'noHolding',
+        earnings,
+        rate: results.length === 1 ? (results[0].rate ?? null) : null,
+        readyCount: readyResults.length,
+        waitingCount,
+        excludedCount,
+        noHoldingCount,
+        totalCount: readyResults.length + waitingCount,
+        partial: readyResults.length > 0 && waitingCount > 0
+      };
+    },
+    [
+      yesterdayProfitDate,
+      currentTab,
+      activeGroupId,
+      linkedHoldingsForAllFav,
+      holdings,
+      groupHoldings,
+      groups,
+      fundDailyEarnings,
+      fundDividends,
+      transactions
+    ]
+  );
+
   // 过滤和排序后的基金列表（包含“列表搜索”过滤）
   const displayFundsRaw = useMemo(() => {
     let filtered = [...scopedFunds];
@@ -995,32 +1081,10 @@ export default function HomePage() {
         return sortOrder === 'asc' ? valA - valB : valB - valA;
       }
       if (sortBy === 'yesterdayProfit') {
-        const getYesterdayProfit = (code, jzrq) => {
-          const list = currentFundDailyEarnings?.[code];
-          if (!isArray(list) || list.length === 0) return null;
-          let matchedDaily = null;
-          if (isString(jzrq)) {
-            if (jzrq === todayStr) {
-              for (let i = list.length - 1; i >= 0; i--) {
-                if (list[i]?.date && list[i].date < todayStr) {
-                  matchedDaily = list[i];
-                  break;
-                }
-              }
-            } else {
-              for (const item of list) {
-                if (item?.date === jzrq) {
-                  matchedDaily = item;
-                  break;
-                }
-              }
-            }
-          }
-          if (!matchedDaily && jzrq !== todayStr) matchedDaily = list[list.length - 1];
-          return matchedDaily && Number.isFinite(Number(matchedDaily.earnings)) ? Number(matchedDaily.earnings) : null;
-        };
-        const valA = getYesterdayProfit(a.code, a.jzrq);
-        const valB = getYesterdayProfit(b.code, b.jzrq);
+        const resultA = getYesterdayEarningsForFund(a);
+        const resultB = getYesterdayEarningsForFund(b);
+        const valA = resultA.status === 'ready' ? resultA.earnings : null;
+        const valB = resultB.status === 'ready' ? resultB.earnings : null;
         const hasA = valA != null && Number.isFinite(valA);
         const hasB = valB != null && Number.isFinite(valB);
         if (!hasA && !hasB) return 0;
@@ -1144,7 +1208,7 @@ export default function HomePage() {
     getHoldingProfitForTab,
     deferredGroupFundSearchTerm,
     shouldShowGroupFundSearch,
-    currentFundDailyEarnings,
+    getYesterdayEarningsForFund,
     fundExtraDataByCode,
     todayStr,
     fundTagListsByCode
@@ -1152,24 +1216,29 @@ export default function HomePage() {
 
   const displayFunds = useDeferredValue(displayFundsRaw);
 
-  const latestDailyByCode = useMemo(() => {
-    const out = {};
-    if (!isPlainObject(currentFundDailyEarnings)) return out;
-    for (const f of displayFunds) {
-      const code = f?.code;
-      if (!code) continue;
-      const list = currentFundDailyEarnings[code];
-      if (!isArray(list) || list.length === 0) continue;
-      const byDate = new Map();
-      for (const item of list) {
-        const date = item?.date ? String(item.date) : '';
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-        byDate.set(date, item);
-      }
-      out[code] = { byDate, last: list[list.length - 1] };
+  const yesterdaySummary = useMemo(() => {
+    const summary = {
+      date: yesterdayProfitDate,
+      earnings: 0,
+      ready: 0,
+      waiting: 0,
+      excluded: 0,
+      noHolding: 0,
+      total: 0
+    };
+    for (const fund of displayFunds) {
+      const holding = holdingsForTabWithLinked?.[fund.code];
+      if (!isNumber(holding?.share) || holding.share <= 0) continue;
+      const result = getYesterdayEarningsForFund(fund);
+      summary.total += result.totalCount || 0;
+      summary.ready += result.readyCount || 0;
+      summary.waiting += result.waitingCount || 0;
+      summary.excluded += result.excludedCount || 0;
+      summary.noHolding += result.noHoldingCount || 0;
+      summary.earnings += result.earnings || 0;
     }
-    return out;
-  }, [currentFundDailyEarnings, displayFunds]);
+    return summary;
+  }, [displayFunds, holdingsForTabWithLinked, getYesterdayEarningsForFund, yesterdayProfitDate]);
 
   // 分组内所有基金持仓金额之和，用于持仓占比（PC 端表格 + FundCard 更多区域共用）
   const groupTotalHoldingAmount = useMemo(() => {
@@ -1261,66 +1330,26 @@ export default function HomePage() {
           ? `${profitToday > 0 ? '+' : profitToday < 0 ? '-' : ''}${Math.abs((profitToday / profit.principalToday) * 100).toFixed(2)}%`
           : '';
 
-      const latestNavDateStr = isString(f.jzrq) ? f.jzrq : '';
-      const dailyMeta = latestDailyByCode?.[f.code];
-      const dailyList = currentFundDailyEarnings?.[f.code];
-
-      // 解析昨日收益对应的记录（避免当晚更新今日净值后，“昨日收益”显示成“今日收益”）
-      let yesterdayMatchedDaily = null;
-      if (isArray(dailyList) && dailyList.length > 0) {
-        if (latestNavDateStr === todayStr) {
-          // 如果最新净值日期已更新为今天，昨日收益取今天之前的最后一个记录
-          for (let i = dailyList.length - 1; i >= 0; i--) {
-            if (dailyList[i]?.date && dailyList[i].date < todayStr) {
-              yesterdayMatchedDaily = dailyList[i];
-              break;
-            }
-          }
-        } else {
-          // 否则取最新净值日期对应的记录或最后一个记录
-          yesterdayMatchedDaily =
-            (latestNavDateStr ? dailyMeta?.byDate?.get(latestNavDateStr) || null : null) || dailyMeta?.last || null;
-        }
-      }
-
-      const yesterdayProfitVal =
-        yesterdayMatchedDaily && Number.isFinite(Number(yesterdayMatchedDaily.earnings))
-          ? Number(yesterdayMatchedDaily.earnings)
-          : null;
+      const yesterdayResult = getYesterdayEarningsForFund(f);
+      const yesterdayProfitVal = yesterdayResult.status === 'ready' ? yesterdayResult.earnings : null;
       const yesterdayProfit =
         yesterdayProfitVal == null
-          ? ''
+          ? yesterdayResult.status === 'excluded'
+            ? '暂未纳入'
+            : yesterdayResult.status === 'waiting'
+              ? '待净值'
+              : yesterdayResult.status === 'noHolding'
+                ? '当日未持有'
+                : '—'
           : `${yesterdayProfitVal > 0 ? '+' : yesterdayProfitVal < 0 ? '-' : ''}${formatMoney(Math.abs(yesterdayProfitVal))}`;
-      const dailyBaseCostAmount =
-        yesterdayMatchedDaily &&
-        yesterdayMatchedDaily.baseCostAmount != null &&
-        yesterdayMatchedDaily.baseCostAmount !== '' &&
-        Number.isFinite(Number(yesterdayMatchedDaily.baseCostAmount))
-          ? Number(yesterdayMatchedDaily.baseCostAmount)
-          : null;
-      const derivedRateFromSnapshot =
-        yesterdayProfitVal != null && dailyBaseCostAmount != null && dailyBaseCostAmount > 0
-          ? (yesterdayProfitVal / dailyBaseCostAmount) * 100
-          : null;
-      const dailyRate =
-        yesterdayMatchedDaily &&
-        yesterdayMatchedDaily.rate != null &&
-        yesterdayMatchedDaily.rate !== '' &&
-        Number.isFinite(Number(yesterdayMatchedDaily.rate))
-          ? Number(yesterdayMatchedDaily.rate)
-          : derivedRateFromSnapshot;
+      const dailyRate = yesterdayResult.status === 'ready' ? yesterdayResult.rate : null;
       const yesterdayProfitPercentLine =
         dailyRate != null
           ? `${dailyRate > 0 ? '+' : dailyRate < 0 ? '-' : ''}${Math.abs(dailyRate).toFixed(2)}%`
-          : yesterdayProfitVal != null && principal > 0
-            ? `${yesterdayProfitVal > 0 ? '+' : yesterdayProfitVal < 0 ? '-' : ''}${Math.abs((yesterdayProfitVal / principal) * 100).toFixed(2)}%`
+          : yesterdayResult.partial
+            ? '部分更新'
             : '';
-      const yesterdaySecondLinePctValue =
-        dailyRate != null
-          ? dailyRate
-          : yesterdayProfitVal != null && principal > 0
-            ? (yesterdayProfitVal / principal) * 100
-            : null;
+      const yesterdaySecondLinePctValue = dailyRate;
 
       const holdingProfit =
         total == null ? '' : `${total > 0 ? '+' : total < 0 ? '-' : ''}${formatMoney(Math.abs(total))}`;
@@ -1442,6 +1471,8 @@ export default function HomePage() {
         todayProfitValue,
         yesterdayProfit,
         yesterdayProfitValue: yesterdayProfitVal,
+        yesterdayProfitDate: yesterdayProfitDate,
+        yesterdayProfitStatus: yesterdayResult.status,
         yesterdayProfitPercent: yesterdayProfitPercentLine,
         yesterdaySecondLinePctValue,
         holdingProfit,
@@ -1459,7 +1490,7 @@ export default function HomePage() {
     dcaPlansForTab,
     allEnabledDcaCodes,
     pendingCodesForTab,
-    latestDailyByCode,
+    getYesterdayEarningsForFund,
     currentTab,
     summaryHoldingSourceGroupByCode,
     linkedHoldingsForAllFav,
@@ -5232,6 +5263,7 @@ export default function HomePage() {
                         groups={groups}
                         getProfit={getHoldingProfitForTab}
                         summaryTabPortfolioTotals={summaryTabPortfolioTotals}
+                        yesterdaySummary={yesterdaySummary}
                         navbarHeight={navbarHeight}
                         filterBarHeight={filterBarHeight}
                         isGroupSummarySticky={isGroupSummarySticky}
@@ -5252,6 +5284,7 @@ export default function HomePage() {
                         groups={groups}
                         getProfit={getHoldingProfitForTab}
                         summaryTotalsOverride={null}
+                        yesterdaySummary={yesterdaySummary}
                         stickyTop={navbarHeight + filterBarHeight + (isMobile ? -14 : 0)}
                         isSticky={isGroupSummarySticky}
                         onToggleSticky={(next) => setIsGroupSummarySticky(next)}

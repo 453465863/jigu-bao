@@ -11,6 +11,7 @@ export default function SummaryTabContent({
   groups,
   getProfit,
   summaryTabPortfolioTotals,
+  yesterdaySummary,
   navbarHeight,
   filterBarHeight,
   isGroupSummarySticky,
@@ -32,6 +33,7 @@ export default function SummaryTabContent({
         groups={groups}
         getProfit={getProfit}
         summaryTotalsOverride={summaryTabPortfolioTotals}
+        yesterdaySummary={yesterdaySummary}
         stickyTop={navbarHeight + filterBarHeight + (isMobile ? -14 : 0)}
         isSticky={isGroupSummarySticky}
         onToggleSticky={(next) => setIsGroupSummarySticky(next)}

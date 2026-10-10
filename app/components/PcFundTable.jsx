@@ -2372,7 +2372,7 @@ const PcFundTable = memo(function PcFundTable({
           const value = original.yesterdayProfitValue;
           const hasProfit = value != null;
           const cls = hasProfit ? (value > 0 ? 'up' : value < 0 ? 'down' : '') : 'muted';
-          const amountStr = hasProfit ? (info.getValue() ?? '') : '—';
+          const amountStr = hasProfit ? (info.getValue() ?? '') : original.yesterdayProfit || '—';
           const percentStr = original.yesterdayProfitPercent ?? '';
           const pctVal = original.yesterdaySecondLinePctValue;
           const pctCls =

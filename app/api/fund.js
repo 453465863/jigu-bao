@@ -732,14 +732,7 @@ export const fetchNavMetricsFromTrendFallback = async (code) => {
     if (!isArray(trend) || trend.length === 0) return null;
 
     const valid = trend
-      .filter(
-        (d) =>
-          isObject(d) &&
-          isNumber(d.x) &&
-          Number.isFinite(Number(d.y)) &&
-          !isNil(d.equityReturn) &&
-          Number.isFinite(Number(d.equityReturn))
-      )
+      .filter((d) => isObject(d) && isNumber(d.x) && Number.isFinite(Number(d.y)))
       .sort((a, b) => a.x - b.x);
 
     if (valid.length === 0) return null;
@@ -748,7 +741,8 @@ export const fetchNavMetricsFromTrendFallback = async (code) => {
     const prev = valid.length > 1 ? valid[valid.length - 2] : null;
 
     const dwjz = String(latest.y);
-    const zzl = Number(latest.equityReturn);
+    const zzl =
+      !isNil(latest.equityReturn) && Number.isFinite(Number(latest.equityReturn)) ? Number(latest.equityReturn) : null;
     const jzrq = dayjs(latest.x).tz(TZ).format('YYYY-MM-DD');
     const lastNav = !isNil(prev) ? String(prev.y) : null;
     const yesterdayZzl =
@@ -757,6 +751,10 @@ export const fetchNavMetricsFromTrendFallback = async (code) => {
         : null;
     const yesterdayNavDelta =
       !isNil(prev) && Number.isFinite(Number(prev.y)) ? Number(latest.y) - Number(prev.y) : null;
+    const navHistory = valid.slice(-3).map((row) => ({
+      date: dayjs(row.x).tz(TZ).format('YYYY-MM-DD'),
+      nav: Number(row.y)
+    }));
 
     return {
       dwjz,
@@ -764,7 +762,8 @@ export const fetchNavMetricsFromTrendFallback = async (code) => {
       jzrq,
       lastNav,
       yesterdayZzl,
-      yesterdayNavDelta
+      yesterdayNavDelta,
+      navHistory
     };
   } catch {
     return null;
@@ -845,7 +844,8 @@ export const fetchFundDataFallback = async (c) => {
             previousNav: !isNil(trendFallback.lastNav) ? { nav: trendFallback.lastNav } : null,
             yM: {
               yesterdayZzl: trendFallback.yesterdayZzl,
-              yesterdayNavDelta: trendFallback.yesterdayNavDelta
+              yesterdayNavDelta: trendFallback.yesterdayNavDelta,
+              navHistory: trendFallback.navHistory
             }
           };
         }
@@ -879,6 +879,7 @@ export const fetchFundDataFallback = async (c) => {
           zzl: Number.isFinite(latest.growth) ? latest.growth : null,
           yesterdayZzl: yM.yesterdayZzl,
           yesterdayNavDelta: yM.yesterdayNavDelta,
+          navHistory: yM.navHistory,
           noValuation: true,
           valuationSource: 'fallback',
           holdings: [],
@@ -1478,6 +1479,9 @@ export const fetchFundData = async (c, overrideDataSource) => {
       }
       if (Object.prototype.hasOwnProperty.call(tData, 'yesterdayNavDelta')) {
         baseData.yesterdayNavDelta = tData.yesterdayNavDelta;
+      }
+      if (isArray(tData.navHistory)) {
+        baseData.navHistory = tData.navHistory;
       }
     }
 

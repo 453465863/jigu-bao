@@ -90,6 +90,7 @@ export default function GroupSummary({
   getProfit,
   /** 与内部 summary 同结构；传入时顶部汇总数字以此为准（如汇总 Tab 下全局+分组双账本合计） */
   summaryTotalsOverride = null,
+  yesterdaySummary = null,
   stickyTop,
   isSticky = false,
   onToggleSticky,
@@ -428,6 +429,59 @@ export default function GroupSummary({
             </div>
           </div>
         </div>
+        {yesterdaySummary?.date &&
+          (yesterdaySummary.total > 0 || yesterdaySummary.excluded > 0 || yesterdaySummary.noHolding > 0) && (
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 10,
+                marginTop: 12,
+                paddingTop: 10,
+                borderTop: '1px solid var(--border)',
+                alignItems: 'center',
+                flexWrap: 'wrap'
+              }}
+            >
+              <div className="muted" style={{ fontSize: '12px' }}>
+                场外持仓最近单日收益（净值推算）· {yesterdaySummary.date}
+                <span style={{ marginLeft: 8 }}>
+                  {yesterdaySummary.ready}/{yesterdaySummary.total} 已更新
+                </span>
+                {yesterdaySummary.excluded > 0 && (
+                  <span style={{ marginLeft: 8 }}>场内 ETF {yesterdaySummary.excluded} 只暂未纳入</span>
+                )}
+                {yesterdaySummary.noHolding > 0 && (
+                  <span style={{ marginLeft: 8 }}>{yesterdaySummary.noHolding} 只当日未持有</span>
+                )}
+              </div>
+              <div
+                className={
+                  yesterdaySummary.ready === 0
+                    ? 'muted'
+                    : yesterdaySummary.earnings > 0
+                      ? 'up'
+                      : yesterdaySummary.earnings < 0
+                        ? 'down'
+                        : ''
+                }
+                style={{ fontSize: '16px', fontWeight: 700, fontFamily: 'var(--font-mono)' }}
+              >
+                {isMasked
+                  ? '******'
+                  : yesterdaySummary.total === 0
+                    ? '当日无有效持仓'
+                    : yesterdaySummary.ready === 0
+                      ? '等待净值'
+                      : `${yesterdaySummary.earnings > 0 ? '+' : yesterdaySummary.earnings < 0 ? '-' : ''}${formatMoney(Math.abs(yesterdaySummary.earnings))} 元`}
+                {yesterdaySummary.waiting > 0 && yesterdaySummary.ready > 0 && (
+                  <span className="muted" style={{ fontSize: '11px', marginLeft: 6 }}>
+                    部分更新
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
       </div>
     </div>
   );
